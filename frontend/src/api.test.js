@@ -10,7 +10,7 @@ describe('FastAPI client contract', () => {
 
     await api.listNotes(20, 10);
 
-    expect(global.fetch).toHaveBeenCalledWith('/api/board/list?offset=20&limit=10', expect.objectContaining({ credentials: 'same-origin' }));
+    expect(global.fetch).toHaveBeenCalledWith('https://api.aiready.p-e.kr/api/board/list?offset=20&limit=10', expect.objectContaining({ credentials: 'include' }));
   });
 
   it('filters the paginated board list by an encoded category', async () => {
@@ -18,7 +18,7 @@ describe('FastAPI client contract', () => {
 
     await api.listNotes(0, 20, '경제/경영');
 
-    expect(global.fetch).toHaveBeenCalledWith('/api/board/list?offset=0&limit=20&category=%EA%B2%BD%EC%A0%9C%2F%EA%B2%BD%EC%98%81', expect.objectContaining({ credentials: 'same-origin' }));
+    expect(global.fetch).toHaveBeenCalledWith('https://api.aiready.p-e.kr/api/board/list?offset=0&limit=20&category=%EA%B2%BD%EC%A0%9C%2F%EA%B2%BD%EC%98%81', expect.objectContaining({ credentials: 'include' }));
   });
 
   it('filters the paginated board list by sale type', async () => {
@@ -26,7 +26,7 @@ describe('FastAPI client contract', () => {
 
     await api.listNotes(0, 20, undefined, 'paid');
 
-    expect(global.fetch).toHaveBeenCalledWith('/api/board/list?offset=0&limit=20&sale_type=paid', expect.any(Object));
+    expect(global.fetch).toHaveBeenCalledWith('https://api.aiready.p-e.kr/api/board/list?offset=0&limit=20&sale_type=paid', expect.any(Object));
   });
 
   it('sends board writes as JSON using the backend field names', async () => {
@@ -34,7 +34,7 @@ describe('FastAPI client contract', () => {
 
     await api.createNote({ title: '제목', contents: '내용', category: '경제/경영' });
 
-    expect(global.fetch).toHaveBeenCalledWith('/api/board/write', expect.objectContaining({
+    expect(global.fetch).toHaveBeenCalledWith('https://api.aiready.p-e.kr/api/board/write', expect.objectContaining({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title: '제목', contents: '내용', category: '경제/경영' }),
@@ -46,7 +46,7 @@ describe('FastAPI client contract', () => {
 
     await api.createNote({ title: '유료 글', contents: '본문', category: '인문/교양', sale_price: 3900, preview: '공개 미리보기' });
 
-    expect(global.fetch).toHaveBeenCalledWith('/api/board/write', expect.objectContaining({
+    expect(global.fetch).toHaveBeenCalledWith('https://api.aiready.p-e.kr/api/board/write', expect.objectContaining({
       body: JSON.stringify({ title: '유료 글', contents: '본문', category: '인문/교양', sale_price: 3900, preview: '공개 미리보기' }),
     }));
   });
@@ -56,10 +56,10 @@ describe('FastAPI client contract', () => {
 
     await api.preparePurchase(9);
 
-    expect(global.fetch).toHaveBeenCalledWith('/api/purchases/prepare', expect.objectContaining({
+    expect(global.fetch).toHaveBeenCalledWith('https://api.aiready.p-e.kr/api/purchases/prepare', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({ board_idx: 9 }),
-      credentials: 'same-origin',
+      credentials: 'include',
     }));
   });
 
@@ -68,10 +68,10 @@ describe('FastAPI client contract', () => {
 
     await api.confirmPurchase('article-1');
 
-    expect(global.fetch).toHaveBeenCalledWith('/api/purchases/confirm', expect.objectContaining({
+    expect(global.fetch).toHaveBeenCalledWith('https://api.aiready.p-e.kr/api/purchases/confirm', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({ payment_id: 'article-1' }),
-      credentials: 'same-origin',
+      credentials: 'include',
     }));
   });
 
@@ -93,8 +93,8 @@ describe('FastAPI client contract', () => {
 
     await expect(api.getKakaoLoginState()).resolves.toEqual(state);
 
-    expect(global.fetch).toHaveBeenCalledWith('/api/user/kakao/state', expect.objectContaining({
-      credentials: 'same-origin',
+    expect(global.fetch).toHaveBeenCalledWith('https://api.aiready.p-e.kr/api/user/kakao/state', expect.objectContaining({
+      credentials: 'include',
     }));
   });
 
@@ -102,7 +102,7 @@ describe('FastAPI client contract', () => {
     global.fetch.mockResolvedValue({ ok: true, json: async () => ({ email: null, name: '카카오 사용자' }) });
 
     await expect(api.getCurrentUser()).resolves.toEqual({ email: null, name: '카카오 사용자' });
-    expect(global.fetch).toHaveBeenCalledWith('/api/user/me', expect.objectContaining({ credentials: 'same-origin' }));
+    expect(global.fetch).toHaveBeenCalledWith('https://api.aiready.p-e.kr/api/user/me', expect.objectContaining({ credentials: 'include' }));
   });
 
   it('clears the signed-in session through the logout endpoint', async () => {
@@ -110,9 +110,9 @@ describe('FastAPI client contract', () => {
 
     await expect(api.logout()).resolves.toEqual({ message: '로그아웃되었습니다.' });
 
-    expect(global.fetch).toHaveBeenCalledWith('/api/user/logout', expect.objectContaining({
+    expect(global.fetch).toHaveBeenCalledWith('https://api.aiready.p-e.kr/api/user/logout', expect.objectContaining({
       method: 'POST',
-      credentials: 'same-origin',
+      credentials: 'include',
     }));
   });
 });

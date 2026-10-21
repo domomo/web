@@ -1,0 +1,52 @@
+name: Deploy backend
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "app/**"
+      - "requirements.txt"
+      - "scripts/deploy/deploy-backend.ps1"
+      - ".github/workflows/deploy-backend.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
+
+env:
+  # 백엔드 Windows 서버 경로 (.env, app.db, .venv, certs 는 BACKEND_DIR 에 유지됨)
+  BACKEND_DIR: 'C:\backend'
+  STAGING_DIR: 'C:\Users\test\deploy\backend'
+  BACKEND_PORT: "443"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Upload backend files to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_BACKEND_HOST }}
+          port: ${{ secrets.DEPLOY_BACKEND_PORT }}
+          username: ${{ secrets.DEPLOY_BACKEND_USER }}
+          password: ${{ secrets.DEPLOY_BACKEND_PASSWORD }}
+          source: "app/**,requirements.txt,scripts/deploy/deploy-backend.ps1"
+          target: ${{ env.STAGING_DIR }}
+
+      - name: Stop server, replace code, restart
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_BACKEND_HOST }}
+          port: ${{ secrets.DEPLOY_BACKEND_PORT }}
+          username: ${{ secrets.DEPLOY_BACKEND_USER }}
+          password: ${{ secrets.DEPLOY_BACKEND_PASSWORD }}
+          command_timeout: 10m
+          script: powershell -NoProfile -ExecutionPolicy Bypass -File "${{ env.STAGING_DIR }}\scripts\deploy\deploy-backend.ps1" -StagingDir "${{ env.STAGING_DIR }}" -BackendDir "${{ env.BACKEND_DIR }}" -Port ${{ env.BACKEND_PORT }}

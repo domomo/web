@@ -1,11 +1,13 @@
+const API_BASE_URL = (globalThis.__API_BASE_URL__ || 'https://api.aiready.p-e.kr').replace(/\/$/, '');
+
 async function request(path, options = {}) {
-  const response = await fetch(`/api${path}`, {
+  const response = await fetch(`${API_BASE_URL}/api${path}`, {
     ...options,
     headers: {
       ...(options.body ? { 'Content-Type': 'application/json' } : {}),
       ...options.headers,
     },
-    credentials: 'same-origin',
+    credentials: 'include',
   });
 
   const data = await response.json().catch(() => null);

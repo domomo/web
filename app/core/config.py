@@ -18,9 +18,11 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "my-secret-key-for-jwt-must-be-32-bytes-or-more"
     ALGORITHM: str = "HS256"
     DATABASE_URL: str = "sqlite:///db.sqlite3"
+    FRONTEND_ORIGIN: str = "https://www.aiready.p-e.kr"
+    COOKIE_DOMAIN: str = "aiready.p-e.kr"
     KAKAO_REST_API_KEY: str | None = None
     KAKAO_CLIENT_SECRET: str | None = None
-    KAKAO_REDIRECT_URI: str = "http://localhost:8000/api/user/kakao/callback"
+    KAKAO_REDIRECT_URI: str = "https://api.aiready.p-e.kr/api/user/kakao/callback"
     PORTONE_STORE_ID: str | None = None
     PORTONE_CHANNEL_KEY: str | None = None
     PORTONE_API_SECRET: str | None = None

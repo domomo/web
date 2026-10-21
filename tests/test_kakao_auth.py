@@ -78,7 +78,12 @@ def test_token_creation_does_not_print_the_signing_secret(monkeypatch, capsys):
 
 
 @pytest.fixture
-def auth_client():
+def auth_client(monkeypatch):
+    # Keep OAuth cookie behavior deterministic regardless of a developer's .env.
+    monkeypatch.setattr(
+        "app.api.routers.user.settings.KAKAO_REDIRECT_URI",
+        "http://api.aiready.p-e.kr/api/user/kakao/callback",
+    )
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)
     testing_session = sessionmaker(autoflush=False, bind=engine)
@@ -88,7 +93,7 @@ def auth_client():
             yield session
 
     app.dependency_overrides[get_db] = override_db
-    with TestClient(app) as client:
+    with TestClient(app, base_url="http://api.aiready.p-e.kr") as client:
         yield client, testing_session
     app.dependency_overrides.pop(get_db, None)
     Base.metadata.drop_all(engine)
@@ -117,8 +122,21 @@ def test_kakao_state_sets_short_lived_http_only_cookie(auth_client):
     assert response.json()["redirect_uri"].endswith("/api/user/kakao/callback")
     cookie = response.headers["set-cookie"].lower()
     assert "httponly" in cookie and "samesite=lax" in cookie and "max-age=300" in cookie
+    assert "domain=aiready.p-e.kr" in cookie
     assert "path=/api/user/kakao/callback" in cookie
     assert response.json()["state"] == client.cookies["kakao_oauth_state"]
+
+
+def test_kakao_state_uses_same_origin_production_callback(auth_client, monkeypatch):
+    client, _ = auth_client
+    callback_url = "https://www.aiready.p-e.kr/api/user/kakao/callback"
+    monkeypatch.setattr("app.api.routers.user.settings.KAKAO_REDIRECT_URI", callback_url)
+
+    response = client.get("/api/user/kakao/state")
+
+    assert response.status_code == 200
+    assert response.json()["redirect_uri"] == callback_url
+    assert "secure" in response.headers["set-cookie"].lower()
 
 
 def test_kakao_callback_creates_nickname_only_user_and_sets_en_at(auth_client):
@@ -126,8 +144,9 @@ def test_kakao_callback_creates_nickname_only_user_and_sets_en_at(auth_client):
     set_provider(StubKakao(profile=type("Profile", (), {"user_id": "k-1", "nickname": "새 사용자"})()))
     state = client.get("/api/user/kakao/state").json()["state"]
     response = client.get("/api/user/kakao/callback", params={"code": "code", "state": state}, follow_redirects=False)
-    assert response.status_code == 302 and response.headers["location"] == "/posts"
-    assert "EN_AT=" in response.headers["set-cookie"]
+    assert response.status_code == 302 and response.headers["location"] == "https://www.aiready.p-e.kr/posts"
+    assert "en_at=" in response.headers["set-cookie"].lower()
+    assert "domain=aiready.p-e.kr" in response.headers["set-cookie"].lower()
     with sessions() as session:
         user = session.scalar(select(User).where(User.kakao_user_id == "k-1"))
         assert user.name == "새 사용자" and user.email is None and user.password is None
@@ -164,6 +183,7 @@ def test_password_login_cookie_works_over_local_http(auth_client, monkeypatch):
 
     assert response.status_code == 200
     assert "httponly" in response.headers["set-cookie"].lower()
+    assert "domain=aiready.p-e.kr" in response.headers["set-cookie"].lower()
     assert "secure" not in response.headers["set-cookie"].lower()
     current_user = client.get("/api/user/me")
     assert current_user.status_code == 200
@@ -176,6 +196,7 @@ def test_password_login_cookie_works_over_local_http(auth_client, monkeypatch):
     deleted_cookie = logout.headers["set-cookie"].lower()
     assert "en_at=\"\"" in deleted_cookie or "en_at=;" in deleted_cookie
     assert "path=/" in deleted_cookie and "max-age=0" in deleted_cookie
+    assert "domain=aiready.p-e.kr" in deleted_cookie
     assert "secure" not in deleted_cookie
     assert client.get("/api/user/me").status_code == 401
 
@@ -188,7 +209,7 @@ def test_kakao_callback_reuses_existing_user_without_email_linking(auth_client):
     set_provider(StubKakao(profile=type("Profile", (), {"user_id": "k-2", "nickname": "Kakao"})()))
     state = client.get("/api/user/kakao/state").json()["state"]
     response = client.get("/api/user/kakao/callback", params={"code": "code", "state": state}, follow_redirects=False)
-    assert response.headers["location"] == "/posts"
+    assert response.headers["location"] == "https://www.aiready.p-e.kr/posts"
     with sessions() as session:
         assert session.query(User).count() == 2
         assert session.scalar(select(User).where(User.kakao_user_id == "k-2")).email is None
@@ -202,7 +223,7 @@ def test_kakao_callback_reuses_existing_kakao_account(auth_client):
     set_provider(StubKakao(profile=type("Profile", (), {"user_id": "k-repeat", "nickname": "Changed"})()))
     state = client.get("/api/user/kakao/state").json()["state"]
     response = client.get("/api/user/kakao/callback", params={"code": "code", "state": state}, follow_redirects=False)
-    assert response.headers["location"] == "/posts"
+    assert response.headers["location"] == "https://www.aiready.p-e.kr/posts"
     with sessions() as session:
         assert session.query(User).count() == 1
         assert session.scalar(select(User).where(User.kakao_user_id == "k-repeat")).name == "Original"
@@ -216,7 +237,7 @@ def test_kakao_callback_rejects_missing_or_mismatched_state(auth_client, callbac
     if callback_state is not None:
         params["state"] = callback_state
     response = client.get("/api/user/kakao/callback", params=params, follow_redirects=False)
-    assert response.headers["location"] == "/login?oauth_error=invalid_state"
+    assert response.headers["location"] == "https://www.aiready.p-e.kr/login?oauth_error=invalid_state"
     assert "kakao_oauth_state=" in response.headers["set-cookie"]
     assert "max-age=0" in response.headers["set-cookie"].lower()
 
@@ -225,20 +246,20 @@ def test_kakao_state_is_single_use(auth_client):
     client, _ = auth_client
     set_provider(StubKakao(profile=type("Profile", (), {"user_id": "k-3", "nickname": "Kakao"})()))
     state = client.get("/api/user/kakao/state").json()["state"]
-    assert client.get("/api/user/kakao/callback", params={"code": "code", "state": state}, follow_redirects=False).headers["location"] == "/posts"
+    assert client.get("/api/user/kakao/callback", params={"code": "code", "state": state}, follow_redirects=False).headers["location"] == "https://www.aiready.p-e.kr/posts"
     repeated = client.get("/api/user/kakao/callback", params={"code": "again", "state": state}, follow_redirects=False)
-    assert repeated.headers["location"] == "/login?oauth_error=invalid_state"
+    assert repeated.headers["location"] == "https://www.aiready.p-e.kr/login?oauth_error=invalid_state"
 
 
 def test_kakao_callback_handles_provider_cancel_and_failure(auth_client):
     client, _ = auth_client
     state = client.get("/api/user/kakao/state").json()["state"]
     cancelled = client.get("/api/user/kakao/callback", params={"error": "access_denied", "state": state}, follow_redirects=False)
-    assert cancelled.headers["location"] == "/login?oauth_error=cancelled"
+    assert cancelled.headers["location"] == "https://www.aiready.p-e.kr/login?oauth_error=cancelled"
     set_provider(StubKakao(error=KakaoOAuthError("provider_error")))
     state = client.get("/api/user/kakao/state").json()["state"]
     failure = client.get("/api/user/kakao/callback", params={"code": "code", "state": state}, follow_redirects=False)
-    assert failure.headers["location"] == "/login?oauth_error=provider_error"
+    assert failure.headers["location"] == "https://www.aiready.p-e.kr/login?oauth_error=provider_error"
 
 
 def test_kakao_callback_rejects_missing_nickname(auth_client):
@@ -246,7 +267,7 @@ def test_kakao_callback_rejects_missing_nickname(auth_client):
     set_provider(StubKakao(error=KakaoOAuthError("profile_incomplete")))
     state = client.get("/api/user/kakao/state").json()["state"]
     response = client.get("/api/user/kakao/callback", params={"code": "code", "state": state}, follow_redirects=False)
-    assert response.headers["location"] == "/login?oauth_error=profile_error"
+    assert response.headers["location"] == "https://www.aiready.p-e.kr/login?oauth_error=profile_error"
 
 
 def test_kakao_callback_handles_database_error_safely(auth_client, monkeypatch):
@@ -261,7 +282,7 @@ def test_kakao_callback_handles_database_error_safely(auth_client, monkeypatch):
 
     monkeypatch.setattr(Session, "commit", fail_commit)
     response = client.get("/api/user/kakao/callback", params={"code": "code", "state": state}, follow_redirects=False)
-    assert response.headers["location"] == "/login?oauth_error=server_error"
+    assert response.headers["location"] == "https://www.aiready.p-e.kr/login?oauth_error=server_error"
 
 
 def test_concurrent_first_kakao_login_reuses_unique_account(auth_client, monkeypatch):
@@ -284,7 +305,7 @@ def test_concurrent_first_kakao_login_reuses_unique_account(auth_client, monkeyp
     set_provider(StubKakao(profile=type("Profile", (), {"user_id": "k-race", "nickname": "Kakao"})()))
     state = client.get("/api/user/kakao/state").json()["state"]
     response = client.get("/api/user/kakao/callback", params={"code": "code", "state": state}, follow_redirects=False)
-    assert response.headers["location"] == "/posts"
+    assert response.headers["location"] == "https://www.aiready.p-e.kr/posts"
     with sessions() as session:
         assert session.query(User).count() == 1
 

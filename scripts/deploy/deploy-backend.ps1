@@ -8,134 +8,387 @@ param(
 
     [int]$Port = 443,
 
-    [string]$SslCertFile = "certs\certificate.crt",
+    [string]$SslCertFile = "certificate.crt",
 
-    [string]$SslKeyFile = "certs\private.key"
+    [string]$SslKeyFile = "private.key",
+
+    [string]$Python = "python"
 )
 
-# 반드시 param 블록 아래에 작성
 $ErrorActionPreference = "Stop"
 
 trap {
+    Write-Host ""
     Write-Host "========== DEPLOY ERROR =========="
     Write-Host "Message: $($_.Exception.Message)"
     Write-Host "Line: $($_.InvocationInfo.ScriptLineNumber)"
     Write-Host "Command: $($_.InvocationInfo.Line)"
     Write-Host "Stack: $($_.ScriptStackTrace)"
     Write-Host "=================================="
-
     exit 1
 }
 
+# --------------------------------------------------
+# Functions
+# --------------------------------------------------
+
+function Stop-ProcessTree {
+    param(
+        [int]$ProcessId
+    )
+
+    if ($ProcessId -le 0) {
+        return
+    }
+
+    $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+
+    if ($null -ne $process) {
+        Write-Host "Stopping process tree: $ProcessId"
+
+        & taskkill.exe /PID $ProcessId /T /F | Out-Host
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to stop process $ProcessId"
+        }
+    }
+}
+
+function Invoke-Native {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FilePath,
+
+        [string[]]$Arguments = @()
+    )
+
+    if ([string]::IsNullOrWhiteSpace($FilePath)) {
+        throw "Executable path is null or empty."
+    }
+
+    Write-Host "Executing: $FilePath $($Arguments -join ' ')"
+
+    & $FilePath @Arguments
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Command failed with exit code $LASTEXITCODE"
+    }
+}
+
+function Test-PortListening {
+    param([int]$ListenPort)
+
+    $connection = Get-NetTCPConnection `
+        -LocalPort $ListenPort `
+        -State Listen `
+        -ErrorAction SilentlyContinue
+
+    return $null -ne $connection
+}
+
+# --------------------------------------------------
+# 0. Validate configuration
+# --------------------------------------------------
+
+Write-Host "========== DEPLOY START =========="
 Write-Host "StagingDir: $StagingDir"
 Write-Host "BackendDir: $BackendDir"
 Write-Host "Port: $Port"
 
-
-# GitHub Actions가 SSH로 백엔드 Windows 서버에서 실행하는 배포 스크립트.
-# 기존 Uvicorn 종료 -> 코드 교체 -> 의존성 설치 -> Uvicorn 재시작 순서로 동작한다.
-param(
-    [Parameter(Mandatory = $true)][string]$StagingDir,
-    [Parameter(Mandatory = $true)][string]$BackendDir,
-    [int]$Port = 443,
-    # BackendDir 기준 상대 경로. 두 파일이 모두 있으면 HTTPS로 실행한다.
-    [string]$SslCertFile = "certs\certificate.crt",
-    [string]$SslKeyFile = "certs\private.key",
-    [string]$Python = "python"
-)
-
-$ErrorActionPreference = "Stop"
-
-function Stop-ProcessTree([int]$ProcessId) {
-    if (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) {
-        Write-Host "Stopping process tree $ProcessId"
-        & taskkill.exe /PID $ProcessId /T /F | Out-Host
-    }
+if ([string]::IsNullOrWhiteSpace($StagingDir)) {
+    throw "StagingDir is empty."
 }
 
-function Invoke-Native([string]$FilePath, [string[]]$Arguments) {
-    & $FilePath @Arguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "$FilePath $($Arguments -join ' ') failed with exit code $LASTEXITCODE"
-    }
+if ([string]::IsNullOrWhiteSpace($BackendDir)) {
+    throw "BackendDir is empty."
 }
 
-if (-not (Test-Path (Join-Path $StagingDir "app"))) {
-    throw "Staged backend code not found: $StagingDir\app"
+$stagedApp = Join-Path $StagingDir "app"
+$stagedRequirements = Join-Path $StagingDir "requirements.txt"
+
+if (-not (Test-Path -LiteralPath $stagedApp -PathType Container)) {
+    throw "Staged app directory not found: $stagedApp"
 }
+
+if (-not (Test-Path -LiteralPath $stagedRequirements -PathType Leaf)) {
+    throw "requirements.txt not found: $stagedRequirements"
+}
+
 New-Item -ItemType Directory -Force -Path $BackendDir | Out-Null
 
-# 1. 기존 서버 종료 (PID 파일 + 포트 점유 프로세스)
-$pidFile = Join-Path $BackendDir "backend.pid"
-if (Test-Path $pidFile) {
-    $oldPid = (Get-Content $pidFile -Raw).Trim()
-    if ($oldPid -match '^\d+$') {
-        Stop-ProcessTree ([int]$oldPid)
-    }
-    Remove-Item $pidFile -Force
-}
-$listeners = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
-foreach ($owner in ($listeners | Select-Object -ExpandProperty OwningProcess -Unique)) {
-    Stop-ProcessTree ([int]$owner)
-}
-for ($i = 0; $i -lt 20; $i++) {
-    if (-not (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)) { break }
-    Start-Sleep -Seconds 1
-}
-if (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue) {
-    throw "Port $Port is still in use. Stop the existing server manually (it may be owned by another user)."
-}
-
-# 2. 코드 교체 (.env, app.db, .venv, 로그는 유지)
 $appDir = Join-Path $BackendDir "app"
-if (Test-Path $appDir) {
-    Remove-Item $appDir -Recurse -Force
-}
-Copy-Item (Join-Path $StagingDir "app") $appDir -Recurse -Force
-Copy-Item (Join-Path $StagingDir "requirements.txt") (Join-Path $BackendDir "requirements.txt") -Force
-# 다음 업로드에 이전 파일이 섞이지 않도록 업로드 폴더 정리
-Remove-Item $StagingDir -Recurse -Force
-
-# 3. 가상환경 및 의존성
-$venvPython = Join-Path $BackendDir ".venv\Scripts\python.exe"
-if (-not (Test-Path $venvPython)) {
-    Write-Host "Creating virtual environment with $Python"
-    Invoke-Native $Python @("-m", "venv", (Join-Path $BackendDir ".venv"))
-}
-Invoke-Native $venvPython @("-m", "pip", "install", "--disable-pip-version-check", "-q", "-r", (Join-Path $BackendDir "requirements.txt"))
-
-# 4. 서버 시작
-# 환경변수(KAKAO_*, JWT_SECRET_KEY 등)는 BackendDir\.env 에서 앱이 읽는다.
-if (-not (Test-Path (Join-Path $BackendDir ".env"))) {
-    Write-Warning "$BackendDir\.env not found. The app will start with default settings."
-}
-$uvicornArgs = "-m uvicorn app.main:app --host 0.0.0.0 --port $Port"
-if ((Test-Path (Join-Path $BackendDir $SslCertFile)) -and (Test-Path (Join-Path $BackendDir $SslKeyFile))) {
-    $uvicornArgs += " --ssl-certfile `"$SslCertFile`" --ssl-keyfile `"$SslKeyFile`""
-} else {
-    Write-Warning "SSL certificate not found under $BackendDir. Starting without HTTPS."
-}
-# SSH 세션에서 띄운 프로세스는 세션 종료 시 함께 종료되므로 WMI(Win32_Process)로 분리해서 실행한다.
+$pidFile = Join-Path $BackendDir "backend.pid"
 $logFile = Join-Path $BackendDir "backend.log"
-$commandLine = "cmd.exe /c `"`"$venvPython`" $uvicornArgs >> `"$logFile`" 2>&1`""
-$result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
-    CommandLine      = $commandLine
-    CurrentDirectory = $BackendDir
-}
-if ($result.ReturnValue -ne 0) {
-    throw "Failed to start backend (Win32_Process.Create returned $($result.ReturnValue))"
-}
-Set-Content -Path $pidFile -Value $result.ProcessId -Encoding ascii
-Write-Host "Backend started (pid $($result.ProcessId)) on port $Port"
 
-# 5. 기동 확인
-for ($i = 0; $i -lt 30; $i++) {
-    if (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue) {
-        Write-Host "Backend is listening on port $Port"
-        exit 0
+$certPath = Join-Path $BackendDir $SslCertFile
+$keyPath = Join-Path $BackendDir $SslKeyFile
+
+$venvDir = Join-Path $BackendDir ".venv"
+$venvPython = Join-Path $venvDir "Scripts\python.exe"
+
+# SSL certificate validation
+if (-not (Test-Path -LiteralPath $certPath -PathType Leaf)) {
+    throw "SSL certificate not found: $certPath"
+}
+
+if (-not (Test-Path -LiteralPath $keyPath -PathType Leaf)) {
+    throw "SSL private key not found: $keyPath"
+}
+
+Write-Host "SSL certificate: $certPath"
+Write-Host "SSL private key: $keyPath"
+
+# --------------------------------------------------
+# 1. Prepare Python environment
+# --------------------------------------------------
+
+Write-Host ""
+Write-Host "========== PYTHON ENV =========="
+
+if (-not (Test-Path -LiteralPath $venvPython -PathType Leaf)) {
+
+    Write-Host "Creating virtual environment..."
+
+    Invoke-Native -FilePath $Python -Arguments @(
+        "-m",
+        "venv",
+        $venvDir
+    )
+}
+
+if (-not (Test-Path -LiteralPath $venvPython -PathType Leaf)) {
+    throw "Virtual environment Python not found: $venvPython"
+}
+
+Write-Host "Installing dependencies..."
+
+Invoke-Native -FilePath $venvPython -Arguments @(
+    "-m",
+    "pip",
+    "install",
+    "--disable-pip-version-check",
+    "-q",
+    "-r",
+    $stagedRequirements
+)
+
+Write-Host "Dependencies installed."
+
+# --------------------------------------------------
+# 2. Stop existing backend
+# --------------------------------------------------
+
+Write-Host ""
+Write-Host "========== STOP BACKEND =========="
+
+# Stop process recorded in PID file.
+if (Test-Path -LiteralPath $pidFile) {
+
+    $oldPid = (Get-Content -LiteralPath $pidFile -Raw).Trim()
+
+    if ($oldPid -match '^\d+$') {
+        Stop-ProcessTree -ProcessId ([int]$oldPid)
     }
+
+    Remove-Item -LiteralPath $pidFile -Force
+}
+
+# Stop processes listening on the backend port.
+$listeners = @(
+    Get-NetTCPConnection `
+        -LocalPort $Port `
+        -State Listen `
+        -ErrorAction SilentlyContinue
+)
+
+$ownerPids = @(
+    $listeners |
+        Where-Object { $null -ne $_ } |
+        Select-Object -ExpandProperty OwningProcess -Unique
+)
+
+foreach ($ownerPid in $ownerPids) {
+    Stop-ProcessTree -ProcessId ([int]$ownerPid)
+}
+
+# Wait for the port to become available.
+for ($i = 0; $i -lt 20; $i++) {
+
+    if (-not (Test-PortListening -ListenPort $Port)) {
+        break
+    }
+
     Start-Sleep -Seconds 1
 }
-Write-Host "Backend did not start listening on port $Port. Last log lines:"
-if (Test-Path $logFile) { Get-Content $logFile -Tail 50 | Out-Host }
-exit 1
+
+if (Test-PortListening -ListenPort $Port) {
+    throw "Port $Port is still in use."
+}
+
+Write-Host "Backend stopped."
+
+# --------------------------------------------------
+# 3. Deploy application
+# --------------------------------------------------
+
+Write-Host ""
+Write-Host "========== DEPLOY FILES =========="
+
+# Replace application directory.
+if (Test-Path -LiteralPath $appDir) {
+
+    Write-Host "Removing old app directory..."
+
+    Remove-Item `
+        -LiteralPath $appDir `
+        -Recurse `
+        -Force
+}
+
+Write-Host "Copying new app files..."
+
+Copy-Item `
+    -LiteralPath $stagedApp `
+    -Destination $appDir `
+    -Recurse `
+    -Force
+
+Copy-Item `
+    -LiteralPath $stagedRequirements `
+    -Destination (Join-Path $BackendDir "requirements.txt") `
+    -Force
+
+Write-Host "Application files deployed."
+
+# Preserve:
+# .env
+# app.db
+# .venv
+# certificate.crt
+# private.key
+# backend.log
+
+# --------------------------------------------------
+# 4. Start Uvicorn HTTPS server
+# --------------------------------------------------
+
+Write-Host ""
+Write-Host "========== START BACKEND =========="
+
+$envFile = Join-Path $BackendDir ".env"
+
+if (-not (Test-Path -LiteralPath $envFile)) {
+    Write-Warning ".env file not found: $envFile"
+}
+
+# Use absolute SSL paths.
+$uvicornArgs = @(
+    "-m",
+    "uvicorn",
+    "app.main:app",
+    "--host",
+    "0.0.0.0",
+    "--port",
+    "$Port",
+    "--ssl-certfile",
+    $certPath,
+    "--ssl-keyfile",
+    $keyPath
+)
+
+# Build the command line.
+$quotedPython = '"' + $venvPython + '"'
+
+$argumentLine = (
+    $uvicornArgs | ForEach-Object {
+        if ($_ -match '\s') {
+            '"' + $_ + '"'
+        }
+        else {
+            $_
+        }
+    }
+) -join " "
+
+$quotedLog = '"' + $logFile + '"'
+
+$commandLine = 'cmd.exe /d /s /c ""' +
+    $venvPython +
+    '" ' +
+    $argumentLine +
+    ' >> ' +
+    $quotedLog +
+    ' 2>&1"'
+
+Write-Host "Starting Uvicorn..."
+Write-Host "Working directory: $BackendDir"
+
+# Create a process independent of the SSH session.
+$result = Invoke-CimMethod `
+    -ClassName Win32_Process `
+    -MethodName Create `
+    -Arguments @{
+        CommandLine      = $commandLine
+        CurrentDirectory = $BackendDir
+    }
+
+if ($result.ReturnValue -ne 0) {
+    throw "Failed to start backend. CIM return code: $($result.ReturnValue)"
+}
+
+$newPid = $result.ProcessId
+
+Set-Content `
+    -LiteralPath $pidFile `
+    -Value $newPid `
+    -Encoding ascii
+
+Write-Host "Backend process created."
+Write-Host "PID: $newPid"
+Write-Host "Port: $Port"
+
+# --------------------------------------------------
+# 5. Verify startup
+# --------------------------------------------------
+
+Write-Host ""
+Write-Host "========== VERIFY BACKEND =========="
+
+$started = $false
+
+for ($i = 0; $i -lt 30; $i++) {
+
+    if (Test-PortListening -ListenPort $Port) {
+        $started = $true
+        break
+    }
+
+    Start-Sleep -Seconds 1
+}
+
+if (-not $started) {
+
+    Write-Host "Backend failed to listen on port $Port"
+
+    if (Test-Path -LiteralPath $logFile) {
+        Write-Host "========== BACKEND LOG =========="
+        Get-Content -LiteralPath $logFile -Tail 50 | Out-Host
+    }
+
+    throw "Backend startup verification failed."
+}
+
+Write-Host "Backend is listening on port $Port"
+
+# Clean staging files only after startup succeeds.
+if (Test-Path -LiteralPath $StagingDir) {
+    Remove-Item -LiteralPath $StagingDir -Recurse -Force
+}
+
+Write-Host ""
+Write-Host "========== DEPLOY SUCCESS =========="
+Write-Host "BackendDir: $BackendDir"
+Write-Host "URL: https://localhost:$Port"
+Write-Host "===================================="
+
+exit 0

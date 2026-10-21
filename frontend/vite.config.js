@@ -16,7 +16,6 @@ export default defineConfig(({ command, mode }) => {
     plugins: [vue()],
     server: { proxy: { '/api': 'http://127.0.0.1:8000' } },
     build: {
-      outDir: '../app/static',
       emptyOutDir: true,
     },
   };

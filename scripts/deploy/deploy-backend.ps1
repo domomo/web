@@ -1,3 +1,16 @@
+$ErrorActionPreference = "Stop"
+
+trap {
+    Write-Host "========== DEPLOY ERROR =========="
+    Write-Host "Message: $($_.Exception.Message)"
+    Write-Host "Line: $($_.InvocationInfo.ScriptLineNumber)"
+    Write-Host "Command: $($_.InvocationInfo.Line)"
+    Write-Host "Stack: $($_.ScriptStackTrace)"
+    Write-Host "=================================="
+
+    exit 1
+}
+
 # GitHub Actions가 SSH로 백엔드 Windows 서버에서 실행하는 배포 스크립트.
 # 기존 Uvicorn 종료 -> 코드 교체 -> 의존성 설치 -> Uvicorn 재시작 순서로 동작한다.
 param(

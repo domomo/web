@@ -1,26 +1,28 @@
-name: Deploy frontend
+name: Deploy backend
 
 on:
   push:
     branches:
       - main
     paths:
-      - "frontend/**"
-      - "scripts/deploy/deploy-frontend.ps1"
-      - ".github/workflows/deploy-frontend.yml"
+      - "app/**"
+      - "requirements.txt"
+      - "scripts/deploy/deploy-backend.ps1"
+      - ".github/workflows/deploy-backend.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: deploy-frontend
+  group: deploy-backend
   cancel-in-progress: false
 
 env:
-  # 프론트엔드 Windows 서버 경로
-  HTML_DIR: 'C:Users\test\nginx-1.30.5\html'
-  STAGING_DIR: 'C:\Users\test\deploy\frontend'
+  # 백엔드 Windows 서버 경로 (.env, app.db, .venv, certs 는 BACKEND_DIR 에 유지됨)
+  BACKEND_DIR: 'C:\backend'
+  STAGING_DIR: 'C:\Users\test\deploy\backend'
+  BACKEND_PORT: "443"
 
 jobs:
   deploy:
@@ -29,34 +31,22 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Build frontend
-        working-directory: frontend
-        run: |
-          npm ci
-          npm run build
-
-      - name: Upload built files to server
+      - name: Upload backend files to server
         uses: appleboy/scp-action@v0.1.7
         with:
-          host: ${{ secrets.DEPLOY_FRONTEND_HOST }}
-          port: ${{ secrets.DEPLOY_FRONTEND_PORT }}
-          username: ${{ secrets.DEPLOY_FRONTEND_USER }}
-          password: ${{ secrets.DEPLOY_FRONTEND_PASSWORD }}
-          source: "frontend/dist/**,scripts/deploy/deploy-frontend.ps1"
+          host: ${{ secrets.DEPLOY_BACKEND_HOST }}
+          port: ${{ secrets.DEPLOY_BACKEND_PORT }}
+          username: ${{ secrets.DEPLOY_BACKEND_USER }}
+          password: ${{ secrets.DEPLOY_BACKEND_PASSWORD }}
+          source: "app/**,requirements.txt,scripts/deploy/deploy-backend.ps1"
           target: ${{ env.STAGING_DIR }}
 
-      - name: Publish to Nginx html folder
+      - name: Stop server, replace code, restart
         uses: appleboy/ssh-action@v1.2.0
         with:
-          host: ${{ secrets.DEPLOY_FRONTEND_HOST }}
-          port: ${{ secrets.DEPLOY_FRONTEND_PORT }}
-          username: ${{ secrets.DEPLOY_FRONTEND_USER }}
-          password: ${{ secrets.DEPLOY_FRONTEND_PASSWORD }}
-          script: powershell -NoProfile -ExecutionPolicy Bypass -File "${{ env.STAGING_DIR }}\scripts\deploy\deploy-frontend.ps1" -StagingDir "${{ env.STAGING_DIR }}\frontend\dist" -HtmlDir "${{ env.HTML_DIR }}"
+          host: ${{ secrets.DEPLOY_BACKEND_HOST }}
+          port: ${{ secrets.DEPLOY_BACKEND_PORT }}
+          username: ${{ secrets.DEPLOY_BACKEND_USER }}
+          password: ${{ secrets.DEPLOY_BACKEND_PASSWORD }}
+          command_timeout: 10m
+          script: powershell -NoProfile -ExecutionPolicy Bypass -File "${{ env.STAGING_DIR }}\scripts\deploy\deploy-backend.ps1" -StagingDir "${{ env.STAGING_DIR }}" -BackendDir "${{ env.BACKEND_DIR }}" -Port ${{ env.BACKEND_PORT }}

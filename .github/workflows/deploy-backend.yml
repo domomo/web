@@ -20,7 +20,7 @@ concurrency:
 
 env:
   # 백엔드 Windows 서버 경로 (.env, app.db, .venv, certs 는 BACKEND_DIR 에 유지됨)
-  BACKEND_DIR: 'C:\backend'
+  BACKEND_DIR: 'C:\Users\test\backend'
   STAGING_DIR: 'C:\Users\test\deploy\backend'
   BACKEND_PORT: "443"
 

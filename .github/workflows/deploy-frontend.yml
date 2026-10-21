@@ -19,7 +19,7 @@ concurrency:
 
 env:
   # 프론트엔드 Windows 서버 경로
-  HTML_DIR: 'C:Users\test\nginx-1.30.5\html'
+  HTML_DIR: 'C:\Users\test\nginx-1.30.5\html'
   STAGING_DIR: 'C:\Users\test\deploy\frontend'
 
 jobs:
@@ -49,7 +49,7 @@ jobs:
           port: ${{ secrets.DEPLOY_FRONTEND_PORT }}
           username: ${{ secrets.DEPLOY_FRONTEND_USER }}
           password: ${{ secrets.DEPLOY_FRONTEND_PASSWORD }}
-          source: "app/static,scripts/deploy/deploy-frontend.ps1"
+          source: "frontend/dist,scripts/deploy/deploy-frontend.ps1"
           target: ${{ env.STAGING_DIR }}
 
       - name: Publish to Nginx html folder

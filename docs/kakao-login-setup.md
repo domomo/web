@@ -9,7 +9,7 @@ The `mlops` app (app ID `1614699`) is configured for local development:
 - JavaScript SDK domains: `http://localhost:5173` and `http://localhost:8000`.
 - Redirect URI: `http://localhost:8000/api/user/kakao/callback`.
 
-These values are registered on the active JavaScript platform key. Do not add a production origin until the production domain is known and registered.
+These values are registered on the active JavaScript platform key. For production, set the backend `KAKAO_REDIRECT_URI` to `https://api.aiready.p-e.kr/api/user/kakao/callback` and register that exact URL in Kakao Developers → Kakao Login → Redirect URI. The frontend calls the backend API domain directly, and the browser returns to the frontend after the backend handles the callback. The backend setting and Kakao registration must match exactly. If the deployed server's `.env` already sets `KAKAO_REDIRECT_URI`, update it and restart Uvicorn.
 
 ## Local environment
 

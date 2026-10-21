@@ -1,6 +1,7 @@
 # 전체 서버 진입점, FastAPI 객체 생성, 라우터 등록, 테이블 생성
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
@@ -9,8 +10,16 @@ from app.db.database import Base, engine, ensure_board_category_column, ensure_b
 from app.models.user import User
 from app.models.board import Board
 from app.models.purchase import PaymentOrder, Purchase
+from app.core.config import settings
 
 app = FastAPI(title="노트 api", version="0.1.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[settings.FRONTEND_ORIGIN],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 static_dir = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=static_dir), name="static")

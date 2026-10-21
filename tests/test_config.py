@@ -3,6 +3,12 @@ from pathlib import Path
 from app.core.config import Settings
 
 
+def test_production_kakao_callback_default():
+    loaded = Settings(_env_file=None)
+
+    assert loaded.KAKAO_REDIRECT_URI == "https://api.aiready.p-e.kr/api/user/kakao/callback"
+
+
 def test_settings_load_shared_env_file_from_project_root():
     expected_env_file = Path(__file__).resolve().parents[1] / ".env"
 

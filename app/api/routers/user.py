@@ -36,8 +36,9 @@ def get_kakao_client():
 
 
 def _kakao_failure(code: str):
-    response = RedirectResponse(f"/login?oauth_error={code}", status_code=302)
-    response.delete_cookie(KAKAO_STATE_COOKIE, path=KAKAO_CALLBACK_PATH)
+    frontend_url = settings.FRONTEND_ORIGIN.rstrip("/")
+    response = RedirectResponse(f"{frontend_url}/login?oauth_error={code}", status_code=302)
+    response.delete_cookie(KAKAO_STATE_COOKIE, path=KAKAO_CALLBACK_PATH, domain=settings.COOKIE_DOMAIN)
     return response
 
 
@@ -51,6 +52,7 @@ def kakao_state(res: Response):
     res.set_cookie(
         KAKAO_STATE_COOKIE,
         state,
+        domain=settings.COOKIE_DOMAIN,
         max_age=300,
         httponly=True,
         secure=settings.KAKAO_REDIRECT_URI.startswith("https://"),
@@ -98,15 +100,16 @@ def kakao_callback(
                 user = db.scalar(select(User).where(User.kakao_user_id == profile.user_id))
                 if user is None:
                     return _kakao_failure("server_error")
-        response = RedirectResponse("/posts", status_code=302)
+        response = RedirectResponse(f"{settings.FRONTEND_ORIGIN.rstrip('/')}/posts", status_code=302)
         response.set_cookie(
             "EN_AT",
             createToken(f"kakao:{profile.user_id}"),
+            domain=settings.COOKIE_DOMAIN,
             httponly=True,
             secure=settings.KAKAO_REDIRECT_URI.startswith("https://"),
             samesite="lax",
         )
-        response.delete_cookie(KAKAO_STATE_COOKIE, path=KAKAO_CALLBACK_PATH)
+        response.delete_cookie(KAKAO_STATE_COOKIE, path=KAKAO_CALLBACK_PATH, domain=settings.COOKIE_DOMAIN)
         return response
     except Exception:
         db.rollback()
@@ -150,6 +153,7 @@ def login(req: LoginReq, res: Response, db: Session = Depends(get_db)):
             res.set_cookie(
                 "EN_AT",
                 createToken(req.email),
+                domain=settings.COOKIE_DOMAIN,
                 httponly=True,
                 secure=settings.KAKAO_REDIRECT_URI.startswith("https://"),
                 samesite="lax"
@@ -166,6 +170,7 @@ def logout(res: Response):
     res.delete_cookie(
         "EN_AT",
         path="/",
+        domain=settings.COOKIE_DOMAIN,
         secure=settings.KAKAO_REDIRECT_URI.startswith("https://"),
         httponly=True,
         samesite="lax",

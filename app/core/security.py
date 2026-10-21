@@ -12,10 +12,22 @@ def createToken(userId:str):
         "sub": userId,
         "exp": datetime.now(timezone.utc) + timedelta(minutes=30),
     }
-    print(settings.SECRET_KEY)
     token = jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
     return token
+
+
+def decode_token(token: str) -> dict:
+    """Decode and validate an EN_AT JWT using the configured signing settings."""
+    return jwt.decode(
+        token,
+        settings.SECRET_KEY,
+        algorithms=[settings.ALGORITHM],
+    )
+
+
+# Keep the existing camelCase naming convention available to callers.
+decodeToken = decode_token
 
 # security 파일
 # 토큰 확인하는 함수

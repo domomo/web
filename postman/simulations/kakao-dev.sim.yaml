@@ -1,0 +1,5 @@
+simulation: kakao-dev
+routing: path
+mocks:
+  - routeKey: kakao
+    path: ../mocks/kakao/config.yaml

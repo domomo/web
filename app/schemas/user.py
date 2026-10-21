@@ -18,4 +18,13 @@ class LoginReq(BaseModel):
 
 class LoginRes(BaseModel):
     email: str
+    name: str
+
+class CurrentUserRes(BaseModel):
+    email: str | None
+    name: str
+
+class KakaoStateRes(BaseModel):
+    state: str
+    redirect_uri: str
 

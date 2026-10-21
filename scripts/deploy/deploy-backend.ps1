@@ -1,3 +1,19 @@
+
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$StagingDir,
+
+    [Parameter(Mandatory = $true)]
+    [string]$BackendDir,
+
+    [int]$Port = 443,
+
+    [string]$SslCertFile = "certs\certificate.crt",
+
+    [string]$SslKeyFile = "certs\private.key"
+)
+
+# 반드시 param 블록 아래에 작성
 $ErrorActionPreference = "Stop"
 
 trap {
@@ -10,6 +26,11 @@ trap {
 
     exit 1
 }
+
+Write-Host "StagingDir: $StagingDir"
+Write-Host "BackendDir: $BackendDir"
+Write-Host "Port: $Port"
+
 
 # GitHub Actions가 SSH로 백엔드 Windows 서버에서 실행하는 배포 스크립트.
 # 기존 Uvicorn 종료 -> 코드 교체 -> 의존성 설치 -> Uvicorn 재시작 순서로 동작한다.
